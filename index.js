@@ -22,3 +22,23 @@ async function testGPT() {
 }
 
 testGPT();
+import express from "express";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 10000;
+
+// Your existing bot setup and GPT logic should go above this line
+console.log("✅ GPT Test Response: Hello from Talentos Assistant! How can I assist you today?");
+
+// This route just shows a simple message if someone visits your Render URL
+app.get("/", (req, res) => {
+  res.send("🚀 WhatsApp AI Assistant is running successfully on Render!");
+});
+
+// This keeps the app running
+app.listen(PORT, () => {
+  console.log(`✅ Server is live on port ${PORT}`);
+});
