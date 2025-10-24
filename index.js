@@ -1,5 +1,7 @@
 import fetch from "node-fetch";
 import dotenv from "dotenv";
+import express from "express";
+
 dotenv.config();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -22,10 +24,6 @@ async function testGPT() {
 }
 
 testGPT();
-import express from "express";
-import dotenv from "dotenv";
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 10000;
