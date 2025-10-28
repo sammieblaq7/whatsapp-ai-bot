@@ -38,26 +38,9 @@ app.post("/webhook", express.json(), async (req, res) => {
       const text = message.text.body;
       console.log("💬 Received message from user:", text);
 
-      // Send to OpenAI
-      const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: "You are Talentos AI Assistant, a friendly helpful bot." },
-            { role: "user", content: text }
-          ],
-        }),
-      });
-
-      const gptData = await gptResponse.json();
-      const reply = gptData.choices?.[0]?.message?.content || "Sorry, I couldn't understand that.";
-
-      console.log("🤖 GPT says:", reply);
+      // TEMPORARY: Static reply for testing
+      const reply = "Test reply - bot is working!";
+      console.log("🤖 Static reply:", reply);
 
       // Send reply via WhatsApp
       const WA_URL = `https://graph.facebook.com/v22.0/${process.env.PHONE_NUMBER_ID}/messages`;
