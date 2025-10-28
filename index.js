@@ -1,16 +1,36 @@
+import express from 'express';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (mode === "subscribe" && token === process.env.WHATSAPP_VERIFY_TOKEN) {
+    console.log("✅ Webhook verified!");
+    res.status(200).send(challenge);
+  } else {
+    console.log("❌ Webhook verification failed");
+    res.sendStatus(403);
+  }
+});
+
 app.post("/webhook", express.json(), async (req, res) => {
   try {
-    // ✅ Step 1: Confirm it's a real message
     const entry = req.body.entry?.[0];
     const changes = entry?.changes?.[0];
     const message = changes?.value?.messages?.[0];
 
     if (message && message.text) {
-      const from = message.from; // WhatsApp user number
-      const text = message.text.body; // Message text
+      const from = message.from;
+      const text = message.text.body;
       console.log("💬 Received message from user:", text);
 
-      // ✅ Step 2: Send user message to GPT
       const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -31,7 +51,6 @@ app.post("/webhook", express.json(), async (req, res) => {
 
       console.log("🤖 GPT says:", reply);
 
-      // ✅ Step 3: Send GPT reply back via WhatsApp API
       const WA_URL = `https://graph.facebook.com/v22.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
 
       const waResponse = await fetch(WA_URL, {
@@ -45,7 +64,7 @@ app.post("/webhook", express.json(), async (req, res) => {
           to: from,
           text: { body: reply },
           context: {
-            message_id: message.id // Add context to reply to the same message
+            message_id: message.id
           }
         }),
       });
@@ -63,4 +82,8 @@ app.post("/webhook", express.json(), async (req, res) => {
     console.error("❌ Error in webhook:", error);
     res.sendStatus(500);
   }
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
