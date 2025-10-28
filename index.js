@@ -6,11 +6,18 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Middleware to log all requests
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
+
 app.get("/", (req, res) => {
   res.send("WhatsApp AI Bot is running!");
 });
 
 app.get("/webhook", (req, res) => {
+  console.log("🔍 Webhook verification attempt");
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
@@ -25,29 +32,40 @@ app.get("/webhook", (req, res) => {
 });
 
 app.post("/webhook", express.json(), async (req, res) => {
+  console.log("📨 Incoming webhook received");
+  
   try {
+    // Always respond to Meta first to prevent retries
+    res.sendStatus(200);
+    
     const entry = req.body.entry?.[0];
     const changes = entry?.changes?.[0];
     const message = changes?.value?.messages?.[0];
 
-    if (message && message.text) {
-      const from = message.from;
-      const text = message.text.body;
-      console.log("💬 Received message from user:", text);
+    if (!message || !message.text) {
+      console.log("ℹ️ No text message found in webhook");
+      return;
+    }
 
-      // DEBUG: Check token format
-      const token = process.env.WHATSAPP_TOKEN;
-      console.log("🔑 Token length:", token.length);
-      console.log("🔑 Token first 20 chars:", token.substring(0, 20));
-      console.log("🔑 Token last 20 chars:", token.substring(token.length - 20));
-      
-      // Test if token has invisible characters
-      const cleanToken = token.replace(/[^\x20-\x7E]/g, '');
-      if (cleanToken.length !== token.length) {
-        console.log("🚨 Token has invisible characters! Cleaned length:", cleanToken.length);
-      }
+    const from = message.from;
+    const text = message.text.body;
+    console.log("💬 Received message from user:", text);
 
+    // Validate all required environment variables
+    const requiredEnvVars = ['WHATSAPP_TOKEN', 'PHONE_NUMBER_ID', 'OPENAI_API_KEY'];
+    const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+    
+    if (missingVars.length > 0) {
+      console.error('❌ Missing environment variables:', missingVars);
+      return;
+    }
+
+    console.log("🔑 Token length:", process.env.WHATSAPP_TOKEN.length);
+    console.log("📱 Phone Number ID:", process.env.PHONE_NUMBER_ID);
+
+    try {
       // Send to OpenAI
+      console.log("🧠 Sending to GPT...");
       const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -63,17 +81,22 @@ app.post("/webhook", express.json(), async (req, res) => {
         }),
       });
 
+      if (!gptResponse.ok) {
+        throw new Error(`GPT API error: ${gptResponse.status}`);
+      }
+
       const gptData = await gptResponse.json();
       const reply = gptData.choices?.[0]?.message?.content || "Sorry, I couldn't understand that.";
       console.log("🤖 GPT says:", reply);
 
-      // Send reply via WhatsApp - try both original and cleaned token
+      // Send reply via WhatsApp
+      console.log("📤 Sending to WhatsApp...");
       const WA_URL = `https://graph.facebook.com/v22.0/${process.env.PHONE_NUMBER_ID}/messages`;
       
       const waResponse = await fetch(WA_URL, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${cleanToken}`,
+          "Authorization": `Bearer ${process.env.WHATSAPP_TOKEN}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -89,15 +112,20 @@ app.post("/webhook", express.json(), async (req, res) => {
         const errorData = await waResponse.text();
         console.error("❌ WhatsApp API error:", errorData);
       }
+
+    } catch (error) {
+      console.error("❌ Processing error:", error);
     }
 
-    res.sendStatus(200);
   } catch (error) {
-    console.error("❌ Error in webhook:", error);
-    res.sendStatus(500);
+    console.error("❌ Webhook error:", error);
   }
 });
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log("🔍 Checking environment variables...");
+  console.log("WHATSAPP_TOKEN exists:", !!process.env.WHATSAPP_TOKEN);
+  console.log("PHONE_NUMBER_ID exists:", !!process.env.PHONE_NUMBER_ID);
+  console.log("OPENAI_API_KEY exists:", !!process.env.OPENAI_API_KEY);
 });
