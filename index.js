@@ -6,6 +6,11 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Add this root route
+app.get("/", (req, res) => {
+  res.send("WhatsApp AI Bot is running!");
+});
+
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
