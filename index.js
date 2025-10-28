@@ -28,19 +28,7 @@ testGPT();
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Your existing bot setup and GPT logic should go above this line
-console.log("✅ GPT Test Response: Hello from Talentos Assistant! How can I assist you today?");
-
-// This route just shows a simple message if someone visits your Render URL
-app.get("/", (req, res) => {
-  res.send("🚀 WhatsApp AI Assistant is running successfully on Render!");
-});
-
-// This keeps the app running
-app.listen(PORT, () => {
-  console.log(`✅ Server is live on port ${PORT}`);
-});
-// WhatsApp webhook verification (GET)
+// ✅ WhatsApp webhook verification (GET)
 app.get("/webhook", (req, res) => {
   const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN; // Set this in Render environment vars
 
@@ -58,8 +46,18 @@ app.get("/webhook", (req, res) => {
   }
 });
 
-// WhatsApp messages (POST)
+// ✅ WhatsApp messages (POST)
 app.post("/webhook", express.json(), (req, res) => {
   console.log("📩 Incoming WhatsApp message:", JSON.stringify(req.body, null, 2));
   res.sendStatus(200);
+});
+
+// Simple homepage
+app.get("/", (req, res) => {
+  res.send("🚀 WhatsApp AI Assistant is running successfully on Render!");
+});
+
+// ✅ Start the server AFTER routes
+app.listen(PORT, () => {
+  console.log(`✅ Server is live on port ${PORT}`);
 });
