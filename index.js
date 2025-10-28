@@ -1,23 +1,44 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import pkg from 'pg';
 
+const { Pool } = pkg;
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware to log all requests
-app.use((req, res, next) => {
-  console.log(`${req.method} ${req.path}`);
-  next();
+// Database connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 });
+
+// Create messages table if not exists
+async function initDatabase() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id SERIAL PRIMARY KEY,
+        user_phone VARCHAR(20) NOT NULL,
+        message_text TEXT NOT NULL,
+        bot_reply TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('✅ Database table ready');
+  } catch (error) {
+    console.error('❌ Database init error:', error);
+  }
+}
+
+app.use(express.json());
 
 app.get("/", (req, res) => {
   res.send("WhatsApp AI Bot is running!");
 });
 
 app.get("/webhook", (req, res) => {
-  console.log("🔍 Webhook verification attempt");
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
@@ -35,7 +56,6 @@ app.post("/webhook", express.json(), async (req, res) => {
   console.log("📨 Incoming webhook received");
   
   try {
-    // Always respond to Meta first to prevent retries
     res.sendStatus(200);
     
     const entry = req.body.entry?.[0];
@@ -51,7 +71,7 @@ app.post("/webhook", express.json(), async (req, res) => {
     const text = message.text.body;
     console.log("💬 Received message from user:", text);
 
-    // Validate all required environment variables
+    // Validate environment variables
     const requiredEnvVars = ['WHATSAPP_TOKEN', 'PHONE_NUMBER_ID', 'OPENAI_API_KEY'];
     const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
     
@@ -60,12 +80,14 @@ app.post("/webhook", express.json(), async (req, res) => {
       return;
     }
 
-    console.log("🔑 Token length:", process.env.WHATSAPP_TOKEN.length);
-    console.log("📱 Phone Number ID:", process.env.PHONE_NUMBER_ID);
+    // Save incoming message to database
+    await pool.query(
+      'INSERT INTO messages (user_phone, message_text) VALUES ($1, $2)',
+      [from, text]
+    );
 
     try {
       // Send to OpenAI
-      console.log("🧠 Sending to GPT...");
       const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -90,7 +112,6 @@ app.post("/webhook", express.json(), async (req, res) => {
       console.log("🤖 GPT says:", reply);
 
       // Send reply via WhatsApp
-      console.log("📤 Sending to WhatsApp...");
       const WA_URL = `https://graph.facebook.com/v22.0/${process.env.PHONE_NUMBER_ID}/messages`;
       
       const waResponse = await fetch(WA_URL, {
@@ -108,6 +129,11 @@ app.post("/webhook", express.json(), async (req, res) => {
 
       if (waResponse.ok) {
         console.log("✅ Reply sent to user!");
+        // Save bot reply to database
+        await pool.query(
+          'UPDATE messages SET bot_reply = $1 WHERE user_phone = $2 AND message_text = $3 AND bot_reply IS NULL',
+          [reply, from, text]
+        );
       } else {
         const errorData = await waResponse.text();
         console.error("❌ WhatsApp API error:", errorData);
@@ -122,10 +148,9 @@ app.post("/webhook", express.json(), async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log("🔍 Checking environment variables...");
-  console.log("WHATSAPP_TOKEN exists:", !!process.env.WHATSAPP_TOKEN);
-  console.log("PHONE_NUMBER_ID exists:", !!process.env.PHONE_NUMBER_ID);
-  console.log("OPENAI_API_KEY exists:", !!process.env.OPENAI_API_KEY);
+// Initialize database and start server
+initDatabase().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
 });

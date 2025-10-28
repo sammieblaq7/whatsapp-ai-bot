@@ -16,3 +16,8 @@
     "node-fetch": "^3.3.2"
   }
 }
+{
+  "dependencies": {
+    "pg": "^8.11.3"
+  }
+}
