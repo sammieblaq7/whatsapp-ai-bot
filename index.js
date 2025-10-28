@@ -1,63 +1,66 @@
-import fetch from "node-fetch";
-import dotenv from "dotenv";
-import express from "express";
+app.post("/webhook", express.json(), async (req, res) => {
+  try {
+    // ✅ Step 1: Confirm it's a real message
+    const entry = req.body.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const message = changes?.value?.messages?.[0];
 
-dotenv.config();
+    if (message && message.text) {
+      const from = message.from; // WhatsApp user number
+      const text = message.text.body; // Message text
+      console.log("💬 Received message from user:", text);
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+      // ✅ Step 2: Send user message to GPT
+      const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: "You are Talentos AI Assistant, a friendly helpful bot." },
+            { role: "user", content: text }
+          ],
+        }),
+      });
 
-async function testGPT() {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: "Say hello from Talentos Assistant" }],
-    }),
-  });
+      const gptData = await gptResponse.json();
+      const reply = gptData.choices?.[0]?.message?.content || "Sorry, I couldn't understand that.";
 
-  const data = await response.json();
-  console.log("✅ GPT Test Response:", data.choices?.[0]?.message?.content);
-}
+      console.log("🤖 GPT says:", reply);
 
-testGPT();
+      // ✅ Step 3: Send GPT reply back via WhatsApp API
+      const WA_URL = `https://graph.facebook.com/v22.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
 
-const app = express();
-const PORT = process.env.PORT || 10000;
+      const waResponse = await fetch(WA_URL, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to: from,
+          text: { body: reply },
+          context: {
+            message_id: message.id // Add context to reply to the same message
+          }
+        }),
+      });
 
-// ✅ WhatsApp webhook verification (GET)
-app.get("/webhook", (req, res) => {
-  const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN; // Set this in Render environment vars
-
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode && token) {
-    if (mode === "subscribe" && token === VERIFY_TOKEN) {
-      console.log("✅ Webhook verified!");
-      res.status(200).send(challenge);
-    } else {
-      res.sendStatus(403);
+      if (waResponse.ok) {
+        console.log("✅ Reply sent to user!");
+      } else {
+        const errorData = await waResponse.text();
+        console.error("❌ WhatsApp API error:", errorData);
+      }
     }
+
+    res.sendStatus(200);
+  } catch (error) {
+    console.error("❌ Error in webhook:", error);
+    res.sendStatus(500);
   }
-});
-
-// ✅ WhatsApp messages (POST)
-app.post("/webhook", express.json(), (req, res) => {
-  console.log("📩 Incoming WhatsApp message:", JSON.stringify(req.body, null, 2));
-  res.sendStatus(200);
-});
-
-// Simple homepage
-app.get("/", (req, res) => {
-  res.send("🚀 WhatsApp AI Assistant is running successfully on Render!");
-});
-
-// ✅ Start the server AFTER routes
-app.listen(PORT, () => {
-  console.log(`✅ Server is live on port ${PORT}`);
 });
