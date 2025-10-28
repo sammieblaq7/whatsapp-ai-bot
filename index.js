@@ -6,11 +6,12 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Add this root route
+// Root route for health checks
 app.get("/", (req, res) => {
   res.send("WhatsApp AI Bot is running!");
 });
 
+// Webhook verification
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -25,6 +26,7 @@ app.get("/webhook", (req, res) => {
   }
 });
 
+// Handle incoming messages
 app.post("/webhook", express.json(), async (req, res) => {
   try {
     const entry = req.body.entry?.[0];
@@ -36,6 +38,7 @@ app.post("/webhook", express.json(), async (req, res) => {
       const text = message.text.body;
       console.log("💬 Received message from user:", text);
 
+      // Send to OpenAI
       const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -56,12 +59,13 @@ app.post("/webhook", express.json(), async (req, res) => {
 
       console.log("🤖 GPT says:", reply);
 
-      const WA_URL = `https://graph.facebook.com/v22.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+      // Send reply via WhatsApp
+      const WA_URL = `https://graph.facebook.com/v22.0/${process.env.PHONE_NUMBER_ID}/messages`;
 
       const waResponse = await fetch(WA_URL, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
+          "Authorization": `Bearer ${process.env.WHATSAPP_TOKEN}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
