@@ -72,7 +72,7 @@ app.post("/webhook", express.json(), async (req, res) => {
     console.log("💬 Received message from user:", text);
 
     // Validate environment variables
-    const requiredEnvVars = ['WHATSAPP_TOKEN', 'PHONE_NUMBER_ID', 'OPENAI_API_KEY'];
+    const requiredEnvVars = ['WHATSAPP_TOKEN', 'PHONE_NUMBER_ID', 'OPENAI_API_KEY', 'OPENAI_ASSISTANT_ID'];
     const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
     
     if (missingVars.length > 0) {
@@ -87,29 +87,139 @@ app.post("/webhook", express.json(), async (req, res) => {
     );
 
     try {
-      // Send to OpenAI
-      const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: "You are Talentos AI Assistant, a friendly helpful bot." },
-            { role: "user", content: text }
-          ],
-        }),
-      });
+      let reply = "Sorry, I couldn't process your message.";
 
-      if (!gptResponse.ok) {
-        throw new Error(`GPT API error: ${gptResponse.status}`);
+      // Check if we're using Assistant API or fallback to basic GPT
+      if (process.env.OPENAI_ASSISTANT_ID) {
+        console.log("🧠 Using OpenAI Assistant API...");
+        
+        // Create a thread for this user
+        const threadResponse = await fetch("https://api.openai.com/v1/threads", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+            "OpenAI-Beta": "assistants=v2"
+          }
+        });
+
+        if (!threadResponse.ok) {
+          throw new Error(`Thread creation failed: ${threadResponse.status}`);
+        }
+
+        const threadData = await threadResponse.json();
+        const threadId = threadData.id;
+
+        // Add user message to thread
+        await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+            "OpenAI-Beta": "assistants=v2"
+          },
+          body: JSON.stringify({
+            role: "user",
+            content: text
+          })
+        });
+
+        // Run the assistant
+        const runResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+            "OpenAI-Beta": "assistants=v2"
+          },
+          body: JSON.stringify({
+            assistant_id: process.env.OPENAI_ASSISTANT_ID
+          })
+        });
+
+        if (!runResponse.ok) {
+          throw new Error(`Run creation failed: ${runResponse.status}`);
+        }
+
+        const runData = await runResponse.json();
+        const runId = runData.id;
+
+        // Wait for completion with timeout
+        let completed = false;
+        let attempts = 0;
+        const maxAttempts = 30; // 30 second timeout
+
+        while (!completed && attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          attempts++;
+          
+          const runStatus = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
+            headers: {
+              "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+              "OpenAI-Beta": "assistants=v2"
+            }
+          });
+          
+          const statusData = await runStatus.json();
+          
+          if (statusData.status === 'completed') {
+            // Get the assistant's response
+            const messagesResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
+              headers: {
+                "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+                "OpenAI-Beta": "assistants=v2"
+              }
+            });
+            
+            const messagesData = await messagesResponse.json();
+            if (messagesData.data && messagesData.data.length > 0) {
+              reply = messagesData.data[0].content[0].text.value;
+            }
+            completed = true;
+          } else if (statusData.status === 'failed') {
+            console.error("Assistant run failed:", statusData);
+            reply = "Sorry, I encountered an error. Please try again.";
+            completed = true;
+          } else if (statusData.status === 'expired') {
+            console.error("Assistant run expired");
+            reply = "Sorry, the request took too long. Please try again.";
+            completed = true;
+          }
+          // Continue waiting for other statuses (queued, in_progress, etc.)
+        }
+
+        if (attempts >= maxAttempts) {
+          console.error("Assistant timeout after 30 seconds");
+          reply = "Sorry, the request timed out. Please try again.";
+        }
+
+      } else {
+        // Fallback to basic GPT
+        console.log("🤖 Using basic GPT fallback...");
+        const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: "You are Talentos AI Assistant, a friendly helpful bot." },
+              { role: "user", content: text }
+            ],
+          }),
+        });
+
+        if (!gptResponse.ok) {
+          throw new Error(`GPT API error: ${gptResponse.status}`);
+        }
+
+        const gptData = await gptResponse.json();
+        reply = gptData.choices?.[0]?.message?.content || "Sorry, I couldn't understand that.";
       }
 
-      const gptData = await gptResponse.json();
-      const reply = gptData.choices?.[0]?.message?.content || "Sorry, I couldn't understand that.";
-      console.log("🤖 GPT says:", reply);
+      console.log("🤖 Assistant says:", reply);
 
       // Send reply via WhatsApp
       const WA_URL = `https://graph.facebook.com/v22.0/${process.env.PHONE_NUMBER_ID}/messages`;
@@ -152,5 +262,9 @@ app.post("/webhook", express.json(), async (req, res) => {
 initDatabase().then(() => {
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
+    console.log("🔍 Checking environment variables...");
+    console.log("OPENAI_ASSISTANT_ID exists:", !!process.env.OPENAI_ASSISTANT_ID);
+    console.log("OPENAI_API_KEY exists:", !!process.env.OPENAI_API_KEY);
+    console.log("WHATSAPP_TOKEN exists:", !!process.env.WHATSAPP_TOKEN);
   });
 });
